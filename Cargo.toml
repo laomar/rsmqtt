@@ -2,10 +2,13 @@
 name = "rsmqtt"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.80.0"
+description = "MQTT Client/Server framework"
 repository = "https://github.com/laomar/rsmqtt"
 documentation = "https://docs.rs/rsmqtt"
-rust-version = "1.80.0"
 keywords = ["mqtt", "iot"]
+categories = ["network-programming"]
+license = "MIT"
 
 [dependencies]
 tokio = { version = "1.41.1", features = ["full"] }
