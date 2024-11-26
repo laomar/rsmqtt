@@ -1,0 +1,11 @@
+[package]
+name = "rsmqtt"
+version = "0.1.0"
+edition = "2021"
+repository = "https://github.com/laomar/rsmqtt"
+documentation = "https://docs.rs/rsmqtt"
+rust-version = "1.80.0"
+keywords = ["mqtt", "iot"]
+
+[dependencies]
+tokio = { version = "1.41.1", features = ["full"] }
