@@ -1,3 +1,3 @@
-# MQTT Client/Server framework
+# MQTT protocol framework
 
 ***
