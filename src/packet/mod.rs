@@ -3,12 +3,12 @@ mod connack;
 
 use std::slice::Iter;
 use std::string::FromUtf8Error;
-use bytes::{Buf, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use thiserror::Error;
 use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 
-pub use connect::Connect;
-use crate::packet::connack::ConnAck;
+pub use connect::*;
+pub use connack::*;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -16,8 +16,14 @@ pub enum Error {
     NotUtf8(#[from] FromUtf8Error),
     #[error("Length is too short")]
     LenShort,
+    #[error("Length is too long")]
+    LenLong,
     #[error("Invalid property: {0}")]
     InvalidProperty(String),
+    #[error("Invalid protocol: {0}")]
+    InvalidProtocol(String),
+    #[error("Invalid protocol version: {0}")]
+    InvalidProtocolVersion(u8),
     #[error("Try From Primitive Error")]
     TryFrom(#[from] TryFromPrimitiveError<Property>),
 }
@@ -106,7 +112,7 @@ pub enum Property {
     ReceiveMaximum = 0x21,
     TopicAliasMax = 0x22,
     TopicAlias = 0x23,
-    MaxQoS = 0x24,
+    MaximumQoS = 0x24,
     RetainAvailable = 0x25,
     UserProperty = 0x26,
     MaxPacketSize = 0x27,
@@ -161,6 +167,11 @@ pub enum ReasonCode {
     SubIDNotSupported = 0xA1,
     WildcardSubNotSupported = 0xA2,
 }
+impl Default for ReasonCode {
+    fn default() -> Self {
+        Self::Success
+    }
+}
 #[derive(Debug)]
 pub struct FixedHeader {
     packet_type: u8,
@@ -194,6 +205,10 @@ fn read_string(read: &mut Bytes) -> Result<String, Error> {
     let str = String::from_utf8(bytes.to_vec())?;
     Ok(str)
 }
+fn write_string(write: &mut BytesMut, str: &str) {
+    write.put_u16(str.len() as u16);
+    write.extend_from_slice(str.as_bytes());
+}
 
 pub fn read_length(read: Iter<u8>) -> Result<(usize, usize), Error> {
     let mut len = 0;
@@ -215,4 +230,21 @@ pub fn read_length(read: Iter<u8>) -> Result<(usize, usize), Error> {
         return Err(Error::LenShort);
     }
     Ok((len, bytes))
+}
+
+fn write_length(write: &mut BytesMut, mut len: usize) -> Result<(), Error> {
+    if len > 268_435_455 {
+        return Err(Error::LenLong);
+    }
+    loop {
+        let mut byte = (len % 128) as u8;
+        len /= 128;
+        if len > 0 {
+            byte |= 0x80;
+        }
+        write.put_u8(byte);
+        if len <= 0 {
+            return Ok(());
+        }
+    }
 }

@@ -1,5 +1,5 @@
 use bytes::{Buf, Bytes};
-use crate::packet::{read_length, read_string, Error, Property, QoS, Version};
+use crate::packet::*;
 
 // CONNECT Packet
 #[derive(Debug, Default)]
@@ -25,8 +25,14 @@ pub struct Connect {
 impl Connect {
     pub fn read(mut packet: Bytes) -> Result<Self, Error> {
         let protocol_name = read_string(&mut packet)?;
+        if protocol_name != "MQTT" && protocol_name != "MQIsdp" {
+            return Err(Error::InvalidProtocol(protocol_name));
+        }
         let version = packet.get_u8();
-        let protocol_version = Version::try_from(version).unwrap();
+        let protocol_version = match Version::try_from(version) {
+            Ok(v) => v,
+            Err(_) => return Err(Error::InvalidProtocolVersion(version)),
+        };
         let connect_flags = packet.get_u8();
         let username_flag = connect_flags & 0x80 > 0;
         let password_flag = connect_flags & 0x40 > 0;

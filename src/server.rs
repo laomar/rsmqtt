@@ -22,8 +22,8 @@ use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::{TlsAcceptor};
 use ws_stream_tungstenite::WsStream;
-use crate::packet;
-use crate::packet::{FixedHeader, Packet, PacketType, Connect, ReasonCode, read_length};
+use crate::packet::{self, *};
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("IO error: {0}")]
@@ -222,15 +222,15 @@ impl<T: S + Debug> Client<T> {
             }
 
 
-            let fixed_header = FixedHeader::new(byte1, remaining_len as u32);
-            let packet_type = fixed_header.packet_type();
+            //let fixed_header = FixedHeader::new(byte1, remaining_len as u32);
+            //let packet_type = fixed_header.packet_type();
             let mut packet = self.read.split_to(len).freeze();
             if remaining_len > 0 {
                 packet.advance(1 + bytes);
             }
 
-            println!("{:?}", fixed_header);
-            let packet = match packet_type {
+            //println!("{:?}", fixed_header);
+            let packet = match PacketType::try_from(byte1 >> 4).unwrap() {
                 PacketType::Connect => {
                     let connect = Connect::read(packet)?;
                     Packet::Connect(connect)
@@ -260,15 +260,23 @@ impl<T: S + Debug> Client<T> {
     async fn write_packet(&mut self, packet: Packet) -> Result<(), Error> {
         match packet {
             Packet::ConnAck(conn_ack) => {
-                println!("{:?}", conn_ack)
+                println!("{:?}", conn_ack);
+                conn_ack.write(&mut self.write)?;
             }
             _ => unreachable!()
         }
+        self.stream.write_all(&self.write).await?;
+        self.write.clear();
         Ok(())
     }
     async fn serve(mut self) {
         match self.connect().await {
-            Ok(_) => {}
+            Ok(_) => {
+                loop {
+                    let packet = self.read_packet().await.unwrap();
+                    println!("{:?}", packet);
+                }
+            }
             Err(e) => {
                 println!("{e}")
             }
@@ -282,8 +290,14 @@ impl<T: S + Debug> Client<T> {
             _ => return Err(Error::NotConnectPacket),
         };
 
-        let mut reason_code = ReasonCode::Success;
         println!("{:?}", connect);
+
+        let mut reason_code = ReasonCode::Success;
+        let mut ack = ConnAck::new();
+        ack.reason_code = reason_code;
+        let packet = Packet::ConnAck(ack);
+        self.write_packet(packet).await?;
+
         Ok(true)
     }
 }
