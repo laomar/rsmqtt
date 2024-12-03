@@ -245,7 +245,9 @@ impl<T: S + Debug> Client<T> {
                 // PacketType::SubAck => {}
                 // PacketType::Unsubscribe => {}
                 // PacketType::UnsubAck => {}
-                // PacketType::PingReq => {}
+                PacketType::PingReq => {
+                    Packet::PingReq
+                }
                 // PacketType::PingResp => {}
                 // PacketType::Disconnect => {}
                 // PacketType::Auth => {}
