@@ -2,7 +2,6 @@
 name = "rsmqtt"
 version = "0.1.1"
 edition = "2021"
-rust-version = "1.80.0"
 description = "MQTT Client/Server framework"
 repository = "https://github.com/laomar/rsmqtt"
 documentation = "https://docs.rs/rsmqtt"
@@ -15,4 +14,6 @@ tokio = { version = "1.41.1", features = ["full"] }
 tokio-rustls = "0.26.0"
 async-tungstenite = { version = "0.28.0", features = ["tokio-runtime"] }
 ws_stream_tungstenite = { version = "0.14.0", features = ["tokio_io"] }
-futures-util = "0.3.31"
+bytes = "1.9.0"
+thiserror = "2.0.3"
+num_enum = "0.7.3"

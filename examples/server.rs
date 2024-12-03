@@ -1,30 +1,29 @@
-use rsmqtt::Mqtt;
+use rsmqtt::MqttServer;
 use tokio::signal;
+use rsmqtt::hook::HookType;
+
+fn hook() {}
 #[tokio::main]
 async fn main() {
-    tokio::task::spawn(async { Mqtt::new().run().await });
-    tokio::task::spawn(async {
-        Mqtt::new()
-            .tls(
-                "0.0.0.0:8883",
-                "./examples/rsmqtt.crt",
-                "./examples/rsmqtt.key",
-            )
-            .run()
-            .await
-    });
-    tokio::task::spawn(async { Mqtt::new().ws("0.0.0.0:8083", "/ws").run().await });
-    tokio::task::spawn(async {
-        Mqtt::new()
-            .wss(
-                "0.0.0.0:8084",
-                "/wss",
-                "./examples/rsmqtt.crt",
-                "./examples/rsmqtt.key",
-            )
-            .run()
-            .await
-    });
-    signal::ctrl_c().await.unwrap();
-    println!("ctrl-c pressed");
+    MqttServer::new()
+        .listen("tcp", "0.0.0.0:1883")
+        .listens(
+            "tls",
+            "0.0.0.0:8883",
+            "./examples/rsmqtt.crt",
+            "./examples/rsmqtt.key",
+        )
+        .listen("ws", "0.0.0.0:8083")
+        .listens(
+            "wss",
+            "0.0.0.0:8084",
+            "./examples/rsmqtt.crt",
+            "./examples/rsmqtt.key",
+        )
+        .hook(HookType::Connect)
+        .run()
+        .await
+        .unwrap();
+    signal::ctrl_c().await.expect("ctrl-c pressed");
+    println!("Mqtt server stopped");
 }
