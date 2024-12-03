@@ -1,5 +1,6 @@
 mod connect;
 mod connack;
+mod ping;
 
 use std::slice::Iter;
 use std::string::FromUtf8Error;
@@ -9,6 +10,7 @@ use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 
 pub use connect::*;
 pub use connack::*;
+pub use ping::*;
 
 #[derive(Debug, Error)]
 pub enum Error {

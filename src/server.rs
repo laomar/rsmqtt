@@ -261,9 +261,12 @@ impl<T: S + Debug> Client<T> {
 
     async fn write_packet(&mut self, packet: Packet) -> Result<(), Error> {
         match packet {
-            Packet::ConnAck(conn_ack) => {
-                println!("{:?}", conn_ack);
-                conn_ack.write(&mut self.write)?;
+            Packet::ConnAck(connack) => {
+                println!("{:?}", connack);
+                connack.write(&mut self.write)?;
+            }
+            Packet::PingResp => {
+                pingresp::write(&mut self.write);
             }
             _ => unreachable!()
         }
@@ -275,7 +278,16 @@ impl<T: S + Debug> Client<T> {
         match self.connect().await {
             Ok(_) => {
                 loop {
-                    let packet = self.read_packet().await.unwrap();
+                    let packet = match self.read_packet().await {
+                        Ok(p) => p,
+                        Err(_) => break
+                    };
+                    match packet {
+                        Packet::PingReq => {
+                            self.write_packet(Packet::PingResp).await.unwrap();
+                        }
+                        _ => unreachable!()
+                    }
                     println!("{:?}", packet);
                 }
             }
