@@ -3,6 +3,10 @@ mod connack;
 mod ping;
 mod publish;
 mod disconnect;
+mod puback;
+mod pubrec;
+mod pubcomp;
+mod pubrel;
 
 use std::slice::Iter;
 use std::string::FromUtf8Error;
@@ -15,6 +19,10 @@ pub use connack::*;
 pub use ping::*;
 pub use publish::*;
 pub use disconnect::*;
+pub use puback::*;
+pub use pubrec::*;
+pub use pubcomp::*;
+pub use pubrel::*;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -58,10 +66,10 @@ pub enum Packet {
     Connect(Connect),
     ConnAck(ConnAck),
     Publish(Publish),
-    PubAck,
-    PubRec,
-    PubRel,
-    PubComp,
+    PubAck(PubAck),
+    PubRec(PubRec),
+    PubRel(PubRel),
+    PubComp(PubComp),
     Subscribe,
     SubAck,
     Unsubscribe,
@@ -126,7 +134,7 @@ pub enum Property {
     SubIdentifierAvailable = 0x29,
     SharedSubAvailable = 0x2A,
 }
-#[derive(Debug, TryFromPrimitive)]
+#[derive(Debug, PartialEq, PartialOrd, TryFromPrimitive)]
 #[repr(u8)]
 pub enum ReasonCode {
     Success = 0x00,
@@ -176,32 +184,6 @@ pub enum ReasonCode {
 impl Default for ReasonCode {
     fn default() -> Self {
         Self::Success
-    }
-}
-#[derive(Debug)]
-pub struct FixedHeader {
-    packet_type: u8,
-    dup: bool,
-    qos: u8,
-    retain: bool,
-    remaining_len: u32,
-}
-
-impl FixedHeader {
-    pub fn new(byte1: u8, remaining_len: u32) -> Self {
-        let packet_type = byte1 >> 4;
-        let flags = byte1 & 0x0F;
-        Self {
-            packet_type,
-            dup: flags >> 3 > 0,
-            qos: (flags >> 1) & 0x03,
-            retain: flags & 0x01 > 0,
-            remaining_len,
-        }
-    }
-
-    pub fn packet_type(&self) -> PacketType {
-        PacketType::try_from(self.packet_type).unwrap()
     }
 }
 

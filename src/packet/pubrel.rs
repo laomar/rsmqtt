@@ -2,26 +2,34 @@ use bytes::{BufMut, BytesMut};
 use crate::packet::*;
 
 #[derive(Debug, Default)]
-pub struct Disconnect {
+pub struct PubRel {
+    pub packet_id: u16,
     pub reason_code: ReasonCode,
-    pub properties: Option<DisconnectProperties>,
+    pub properties: Option<PubRelProperties>,
 }
 
-impl Disconnect {
+impl PubRel {
     pub fn new() -> Self {
         Self {
             ..Default::default()
         }
     }
     pub fn read(mut read: Bytes, version: Version) -> Result<Self, Error> {
-        let mut disconnect = Self::new();
-        if version == Version::V5 {
-            disconnect.reason_code = ReasonCode::try_from(read.get_u8()).unwrap();
-            disconnect.properties = DisconnectProperties::read(&mut read)?;
+        let mut pubrel = Self::new();
+        pubrel.packet_id = read.get_u16();
+        if read.len() == 0 {
+            return Ok(pubrel);
         }
-        Ok(disconnect)
-    }
 
+        if version == Version::V5 {
+            pubrel.reason_code = ReasonCode::try_from(read.get_u8()).unwrap();
+            if read.len() == 0 {
+                return Ok(pubrel);
+            }
+            pubrel.properties = PubRelProperties::read(&mut read)?;
+        }
+        Ok(pubrel)
+    }
     pub fn write(self, write: &mut BytesMut, version: Version) -> Result<(), Error> {
         let mut props_len = 0;
         let mut props_buf = BytesMut::with_capacity(512);
@@ -31,27 +39,27 @@ impl Disconnect {
         }
 
         let mut buf = BytesMut::with_capacity(512);
+        buf.put_u16(self.packet_id);
         if version == Version::V5 {
             buf.put_u8(self.reason_code as u8);
             write_length(&mut buf, props_len)?;
             buf.put(props_buf.freeze());
         }
 
-        write.put_u8((PacketType::Disconnect as u8) << 4);
+        write.put_u8((PacketType::PubRec as u8) << 4);
         write_length(write, buf.len())?;
         write.put(buf.freeze());
         Ok(())
     }
 }
+
 #[derive(Debug, Default)]
-pub struct DisconnectProperties {
-    pub session_expiry_interval: Option<u32>,
-    pub server_reference: Option<String>,
+pub struct PubRelProperties {
     pub reason_string: Option<String>,
     pub user_property: Vec<(String, String)>,
 }
 
-impl DisconnectProperties {
+impl PubRelProperties {
     pub fn new() -> Self {
         Self {
             ..Default::default()
@@ -74,14 +82,6 @@ impl DisconnectProperties {
             }
             let identifier = read.get_u8();
             match Property::try_from(identifier)? {
-                Property::SessionExpiryInterval => {
-                    prop.session_expiry_interval = Some(read.get_u32());
-                }
-
-                Property::ServerReference => {
-                    prop.server_reference = Some(read_string(&mut read)?);
-                }
-
                 Property::ReasonString => {
                     prop.reason_string = Some(read_string(&mut read)?);
                 }
@@ -95,18 +95,7 @@ impl DisconnectProperties {
             }
         }
     }
-
     pub fn write(self, write: &mut BytesMut) {
-        if let Some(session_expiry_interval) = self.session_expiry_interval {
-            write.put_u8(Property::SessionExpiryInterval as u8);
-            write.put_u32(session_expiry_interval);
-        }
-
-        if let Some(server_reference) = self.server_reference {
-            write.put_u8(Property::ServerReference as u8);
-            write_string(write, &server_reference);
-        }
-
         if let Some(reason_string) = self.reason_string {
             write.put_u8(Property::ReasonString as u8);
             write_string(write, &reason_string);

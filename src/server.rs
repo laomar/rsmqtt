@@ -208,7 +208,6 @@ impl<T: S + Debug> Client<T> {
             self.read_bytes(n).await?;
             let mut read = self.read.iter();
             let byte1 = *read.next().unwrap();
-            println!("{:#X}", byte1);
 
             let (remaining_len, bytes) = match read_length(read) {
                 Ok((l, b)) => (l, b),
@@ -224,15 +223,11 @@ impl<T: S + Debug> Client<T> {
                 continue;
             }
 
-
-            //let fixed_header = FixedHeader::new(byte1, remaining_len as u32);
-            //let packet_type = fixed_header.packet_type();
             let mut packet = self.read.split_to(len).freeze();
             if remaining_len > 0 {
                 packet.advance(1 + bytes);
             }
 
-            //println!("{:?}", self.version);
             let packet = match PacketType::try_from(byte1 >> 4).unwrap() {
                 PacketType::Connect => {
                     let connect = Connect::read(packet)?;
@@ -242,14 +237,12 @@ impl<T: S + Debug> Client<T> {
                     let publish = Publish::read(packet, self.version, byte1)?;
                     Packet::Publish(publish)
                 }
-                // PacketType::PubAck => {}
-                // PacketType::PubRec => {}
-                // PacketType::PubRel => {}
-                // PacketType::PubComp => {}
+                PacketType::PubRel => {
+                    let pubrel = PubRel::read(packet, self.version)?;
+                    Packet::PubRel(pubrel)
+                }
                 // PacketType::Subscribe => {}
-                // PacketType::SubAck => {}
                 // PacketType::Unsubscribe => {}
-                // PacketType::UnsubAck => {}
                 PacketType::PingReq => {
                     Packet::PingReq
                 }
@@ -270,14 +263,26 @@ impl<T: S + Debug> Client<T> {
         match packet {
             Packet::ConnAck(connack) => {
                 println!("{:?}", connack);
-                connack.write(&mut self.write)?;
+                connack.write(&mut self.write, self.version)?;
             }
             Packet::PingResp => {
                 pingresp::write(&mut self.write);
             }
             Packet::Disconnect(disconnect) => {
                 println!("{:?}", disconnect);
-                disconnect.write(&mut self.write)?;
+                disconnect.write(&mut self.write, self.version)?;
+            }
+            Packet::PubAck(puback) => {
+                println!("{:?}", puback);
+                puback.write(&mut self.write, self.version)?;
+            }
+            Packet::PubRec(pubrec) => {
+                println!("{:?}", pubrec);
+                pubrec.write(&mut self.write, self.version)?;
+            }
+            Packet::PubComp(pubcomp) => {
+                println!("{:?}", pubcomp);
+                pubcomp.write(&mut self.write, self.version)?;
             }
             _ => unreachable!()
         }
@@ -300,17 +305,29 @@ impl<T: S + Debug> Client<T> {
                         }
                         Packet::Publish(publish) => {
                             println!("{:?}", publish);
-                            let mut disconnect = Disconnect::new();
-                            disconnect.version = self.version;
-                            disconnect.reason_code = ReasonCode::ProtocolError;
-                            let mut prop = DisconnectProperties::new();
-                            prop.reason_string = Some("test".to_owned());
-                            disconnect.properties = Some(prop);
-                            self.write_packet(Packet::Disconnect(disconnect)).await.unwrap();
-                            break;
+                            match publish.qos {
+                                QoS::AtMostOnce => {}
+                                QoS::AtLeastOnce => {
+                                    let mut puback = PubAck::new();
+                                    puback.packet_id = publish.packet_id;
+                                    self.write_packet(Packet::PubAck(puback)).await.unwrap()
+                                }
+                                QoS::ExactlyOnce => {
+                                    let mut pubrec = PubRec::new();
+                                    pubrec.packet_id = publish.packet_id;
+                                    self.write_packet(Packet::PubRec(pubrec)).await.unwrap()
+                                }
+                            }
+                        }
+                        Packet::PubRel(pubrel) => {
+                            println!("{:?}", pubrel);
+                            let mut pubcomp = PubComp::new();
+                            pubcomp.packet_id = pubrel.packet_id;
+                            self.write_packet(Packet::PubComp(pubcomp)).await.unwrap()
                         }
                         Packet::Disconnect(disconnect) => {
                             println!("{:?}", disconnect);
+                            break;
                         }
                         _ => {}
                     }

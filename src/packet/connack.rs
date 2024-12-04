@@ -14,7 +14,7 @@ impl ConnAck {
             ..Default::default()
         }
     }
-    pub fn write(self, write: &mut BytesMut) -> Result<(), Error> {
+    pub fn write(self, write: &mut BytesMut, version: Version) -> Result<(), Error> {
         let mut props_len = 0;
         let mut props_buf = BytesMut::with_capacity(512);
         if let Some(props) = self.properties {
@@ -25,8 +25,10 @@ impl ConnAck {
         let mut buf = BytesMut::with_capacity(512);
         buf.put_u8(self.session_present as u8);
         buf.put_u8(self.reason_code as u8);
-        write_length(&mut buf, props_len)?;
-        buf.put(props_buf.freeze());
+        if version == Version::V5 {
+            write_length(&mut buf, props_len)?;
+            buf.put(props_buf.freeze());
+        }
 
         write.put_u8((PacketType::ConnAck as u8) << 4);
         write_length(write, buf.len())?;

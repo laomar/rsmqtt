@@ -1,4 +1,3 @@
-use std::ops::Deref;
 use bytes::{Buf, Bytes};
 use crate::packet::*;
 
@@ -7,7 +6,6 @@ pub struct Publish {
     pub dup: bool,
     pub qos: QoS,
     pub retain: bool,
-    pub version: Version,
     pub topic_name: String,
     pub packet_id: u16,
     pub properties: Option<PublishProperties>,
@@ -24,12 +22,10 @@ impl Publish {
         let mut publish = Self::new();
 
         // Fixed Header
-        publish.dup = byte1 >> 3 > 0;
-        publish.qos = QoS::try_from((byte1 >> 1) & 0x03).unwrap();
-        publish.retain = byte1 & 0x01 > 0;
-
-        // Version
-        publish.version = version;
+        let flags = byte1 & 0x0F;
+        publish.dup = flags >> 3 > 0;
+        publish.qos = QoS::try_from((flags >> 1) & 0x03).unwrap();
+        publish.retain = flags & 0x01 > 0;
 
         // Topic Name
         publish.topic_name = read_string(&mut read)?;
