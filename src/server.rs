@@ -175,6 +175,7 @@ trait S: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T> S for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
 struct Client<T> {
     stream: T,
+    version: Version,
     read: BytesMut,
     write: BytesMut,
 }
@@ -182,6 +183,7 @@ impl<T: S + Debug> Client<T> {
     fn new(stream: T) -> Self {
         Client {
             stream,
+            version: Version::V5,
             read: BytesMut::with_capacity(10 * 1024),
             write: BytesMut::with_capacity(10 * 1024),
         }
@@ -206,6 +208,7 @@ impl<T: S + Debug> Client<T> {
             self.read_bytes(n).await?;
             let mut read = self.read.iter();
             let byte1 = *read.next().unwrap();
+            println!("{:#X}", byte1);
 
             let (remaining_len, bytes) = match read_length(read) {
                 Ok((l, b)) => (l, b),
@@ -229,14 +232,16 @@ impl<T: S + Debug> Client<T> {
                 packet.advance(1 + bytes);
             }
 
-            //println!("{:?}", fixed_header);
+            //println!("{:?}", self.version);
             let packet = match PacketType::try_from(byte1 >> 4).unwrap() {
                 PacketType::Connect => {
                     let connect = Connect::read(packet)?;
                     Packet::Connect(connect)
                 }
-                // PacketType::ConnAck => {}
-                // PacketType::Publish => {}
+                PacketType::Publish => {
+                    let publish = Publish::read(packet, self.version, byte1)?;
+                    Packet::Publish(publish)
+                }
                 // PacketType::PubAck => {}
                 // PacketType::PubRec => {}
                 // PacketType::PubRel => {}
@@ -248,8 +253,10 @@ impl<T: S + Debug> Client<T> {
                 PacketType::PingReq => {
                     Packet::PingReq
                 }
-                // PacketType::PingResp => {}
-                // PacketType::Disconnect => {}
+                PacketType::Disconnect => {
+                    let disconnect = Disconnect::read(packet, self.version)?;
+                    Packet::Disconnect(disconnect)
+                }
                 // PacketType::Auth => {}
                 _ => unreachable!()
             };
@@ -268,6 +275,10 @@ impl<T: S + Debug> Client<T> {
             Packet::PingResp => {
                 pingresp::write(&mut self.write);
             }
+            Packet::Disconnect(disconnect) => {
+                println!("{:?}", disconnect);
+                disconnect.write(&mut self.write)?;
+            }
             _ => unreachable!()
         }
         self.stream.write_all(&self.write).await?;
@@ -284,11 +295,25 @@ impl<T: S + Debug> Client<T> {
                     };
                     match packet {
                         Packet::PingReq => {
+                            println!("{:?}", packet);
                             self.write_packet(Packet::PingResp).await.unwrap();
                         }
-                        _ => unreachable!()
+                        Packet::Publish(publish) => {
+                            println!("{:?}", publish);
+                            let mut disconnect = Disconnect::new();
+                            disconnect.version = self.version;
+                            disconnect.reason_code = ReasonCode::ProtocolError;
+                            let mut prop = DisconnectProperties::new();
+                            prop.reason_string = Some("test".to_owned());
+                            disconnect.properties = Some(prop);
+                            self.write_packet(Packet::Disconnect(disconnect)).await.unwrap();
+                            break;
+                        }
+                        Packet::Disconnect(disconnect) => {
+                            println!("{:?}", disconnect);
+                        }
+                        _ => {}
                     }
-                    println!("{:?}", packet);
                 }
             }
             Err(e) => {
@@ -305,10 +330,14 @@ impl<T: S + Debug> Client<T> {
         };
 
         println!("{:?}", connect);
+        self.version = connect.protocol_version;
 
         let mut reason_code = ReasonCode::Success;
         let mut ack = ConnAck::new();
         ack.reason_code = reason_code;
+        let mut prop = ConnAckProperties::new();
+        prop.topic_alias_max = Some(300);
+        ack.properties = Some(prop);
         let packet = Packet::ConnAck(ack);
         self.write_packet(packet).await?;
 

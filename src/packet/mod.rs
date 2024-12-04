@@ -1,6 +1,8 @@
 mod connect;
 mod connack;
 mod ping;
+mod publish;
+mod disconnect;
 
 use std::slice::Iter;
 use std::string::FromUtf8Error;
@@ -11,6 +13,8 @@ use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 pub use connect::*;
 pub use connack::*;
 pub use ping::*;
+pub use publish::*;
+pub use disconnect::*;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -53,7 +57,7 @@ pub enum PacketType {
 pub enum Packet {
     Connect(Connect),
     ConnAck(ConnAck),
-    Publish,
+    Publish(Publish),
     PubAck,
     PubRec,
     PubRel,
@@ -64,10 +68,10 @@ pub enum Packet {
     UnsubAck,
     PingReq,
     PingResp,
-    Disconnect,
+    Disconnect(Disconnect),
     Auth,
 }
-#[derive(Debug, TryFromPrimitive)]
+#[derive(Debug, PartialEq, PartialOrd, TryFromPrimitive)]
 #[repr(u8)]
 pub enum QoS {
     AtMostOnce = 0,
@@ -79,7 +83,7 @@ impl Default for QoS {
         Self::AtMostOnce
     }
 }
-#[derive(Debug, PartialEq, TryFromPrimitive)]
+#[derive(Debug, PartialEq, Copy, Clone, TryFromPrimitive)]
 #[repr(u8)]
 pub enum Version {
     V31 = 3,
@@ -99,7 +103,7 @@ pub enum Property {
     ContentType = 0x03,
     ResponseTopic = 0x08,
     CorrelationData = 0x09,
-    SubscriptionIdentifier = 0x0B,
+    SubIdentifier = 0x0B,
     SessionExpiryInterval = 0x11,
     AssignedClientIdentifier = 0x12,
     ServerKeepAlive = 0x13,

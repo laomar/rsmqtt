@@ -4,104 +4,110 @@ use crate::packet::*;
 // CONNECT Packet
 #[derive(Debug, Default)]
 pub struct Connect {
-    protocol_name: String,
-    protocol_version: Version,
-    username_flag: bool,
-    password_flag: bool,
-    will_retain: bool,
-    will_qos: QoS,
-    will_flag: bool,
-    clean_start: bool,
-    keep_alive: u16,
-    properties: Option<ConnectProperties>,
-    client_id: String,
-    will_properties: Option<WillProperties>,
-    will_topic: String,
-    will_payload: String,
-    username: String,
-    password: String,
+    pub protocol_name: String,
+    pub protocol_version: Version,
+    pub username_flag: bool,
+    pub password_flag: bool,
+    pub will_retain: bool,
+    pub will_qos: QoS,
+    pub will_flag: bool,
+    pub clean_start: bool,
+    pub keep_alive: u16,
+    pub properties: Option<ConnectProperties>,
+    pub client_id: String,
+    pub will_properties: Option<WillProperties>,
+    pub will_topic: String,
+    pub will_payload: String,
+    pub username: String,
+    pub password: String,
 }
 
 impl Connect {
-    pub fn read(mut packet: Bytes) -> Result<Self, Error> {
-        let protocol_name = read_string(&mut packet)?;
+    pub fn new() -> Self {
+        Self {
+            ..Default::default()
+        }
+    }
+    pub fn read(mut read: Bytes) -> Result<Self, Error> {
+        let mut connect = Self::new();
+
+        // Protocol Name
+        let protocol_name = read_string(&mut read)?;
         if protocol_name != "MQTT" && protocol_name != "MQIsdp" {
             return Err(Error::InvalidProtocol(protocol_name));
         }
-        let version = packet.get_u8();
-        let protocol_version = match Version::try_from(version) {
+        connect.protocol_name = protocol_name;
+
+        // Protocol Version
+        let protocol_version = read.get_u8();
+        connect.protocol_version = match Version::try_from(protocol_version) {
             Ok(v) => v,
-            Err(_) => return Err(Error::InvalidProtocolVersion(version)),
+            Err(_) => return Err(Error::InvalidProtocolVersion(protocol_version)),
         };
-        let connect_flags = packet.get_u8();
-        let username_flag = connect_flags & 0x80 > 0;
-        let password_flag = connect_flags & 0x40 > 0;
-        let will_retain = connect_flags & 0x20 > 0;
+
+        // Connect Flags
+        let connect_flags = read.get_u8();
+        connect.username_flag = connect_flags & 0x80 > 0;
+        connect.password_flag = connect_flags & 0x40 > 0;
+        connect.will_retain = connect_flags & 0x20 > 0;
         let qos = (connect_flags & 0x18) >> 3;
-        let will_qos = QoS::try_from(qos).unwrap();
-        let will_flag = connect_flags & 0x04 > 0;
-        let clean_start = connect_flags & 0x02 > 0;
-        let keep_alive = packet.get_u16();
-        let mut properties = None;
-        if protocol_version == Version::V5 {
-            properties = ConnectProperties::read(&mut packet)?;
+        connect.will_qos = QoS::try_from(qos).unwrap();
+        connect.will_flag = connect_flags & 0x04 > 0;
+        connect.clean_start = connect_flags & 0x02 > 0;
+
+        // Keep Alive
+        connect.keep_alive = read.get_u16();
+
+        // Properties
+        if connect.protocol_version == Version::V5 {
+            connect.properties = ConnectProperties::read(&mut read)?;
         }
-        let client_id = read_string(&mut packet)?;
-        let mut will_properties = None;
-        let mut will_topic = "".to_owned();
-        let mut will_payload = "".to_owned();
-        if will_flag {
-            if protocol_version == Version::V5 {
-                will_properties = WillProperties::read(&mut packet)?;
+
+        // Client ID
+        connect.client_id = read_string(&mut read)?;
+
+        // Will
+        if connect.will_flag {
+            if connect.protocol_version == Version::V5 {
+                connect.will_properties = WillProperties::read(&mut read)?;
             }
-            will_topic = read_string(&mut packet)?;
-            will_payload = read_string(&mut packet)?;
+            connect.will_topic = read_string(&mut read)?;
+            connect.will_payload = read_string(&mut read)?;
         }
-        let mut username = "".to_owned();
-        if username_flag {
-            username = read_string(&mut packet)?;
+
+        // User Name
+        if connect.username_flag {
+            connect.username = read_string(&mut read)?;
         }
-        let mut password = "".to_owned();
-        if password_flag {
-            password = read_string(&mut packet)?;
+
+        // Password
+        if connect.password_flag {
+            connect.password = read_string(&mut read)?;
         }
-        Ok(Connect {
-            protocol_name,
-            protocol_version,
-            username_flag,
-            password_flag,
-            will_retain,
-            will_qos,
-            will_flag,
-            clean_start,
-            keep_alive,
-            properties,
-            client_id,
-            will_properties,
-            will_topic,
-            will_payload,
-            username,
-            password,
-            ..Default::default()
-        })
+        Ok(connect)
     }
 }
 
 #[derive(Debug, Default)]
 pub struct ConnectProperties {
-    session_expiry_interval: Option<u32>,
-    receive_maximum: Option<u16>,
-    max_packet_size: Option<u32>,
-    topic_alias_max: Option<u16>,
-    request_response_info: Option<u8>,
-    request_problem_info: Option<u8>,
-    user_property: Vec<(String, String)>,
-    auth_method: Option<String>,
-    auth_data: Option<Vec<u8>>,
+    pub session_expiry_interval: Option<u32>,
+    pub receive_maximum: Option<u16>,
+    pub max_packet_size: Option<u32>,
+    pub topic_alias_max: Option<u16>,
+    pub request_response_info: Option<u8>,
+    pub request_problem_info: Option<u8>,
+    pub user_property: Vec<(String, String)>,
+    pub auth_method: Option<String>,
+    pub auth_data: Option<Vec<u8>>,
 }
 impl ConnectProperties {
+    pub fn new() -> Self {
+        Self {
+            ..Default::default()
+        }
+    }
     pub fn read(read: &mut Bytes) -> Result<Option<Self>, Error> {
-        let (mut len, bytes) = read_length(read.iter())?;
+        let (len, bytes) = read_length(read.iter())?;
         read.advance(bytes);
 
         if len == 0 {
@@ -109,9 +115,7 @@ impl ConnectProperties {
         }
 
         let mut read = read.split_to(len);
-        let mut prop = Self {
-            ..Default::default()
-        };
+        let mut prop = Self::new();
 
         loop {
             if read.len() == 0 {
@@ -122,32 +126,40 @@ impl ConnectProperties {
                 Property::SessionExpiryInterval => {
                     prop.session_expiry_interval = Some(read.get_u32());
                 }
+
                 Property::ReceiveMaximum => {
                     prop.receive_maximum = Some(read.get_u16());
                 }
+
                 Property::MaxPacketSize => {
                     prop.max_packet_size = Some(read.get_u32());
                 }
+
                 Property::TopicAliasMax => {
                     prop.topic_alias_max = Some(read.get_u16());
                 }
+
                 Property::RequestResponseInfo => {
                     prop.request_response_info = Some(read.get_u8());
                 }
+
                 Property::RequestProblemInfo => {
                     prop.request_problem_info = Some(read.get_u8());
                 }
+
                 Property::UserProperty => {
                     let k = read_string(&mut read)?;
                     let v = read_string(&mut read)?;
                     prop.user_property.push((k, v));
                 }
+
                 Property::AuthMethod => {
                     prop.auth_method = Some(read_string(&mut read)?);
                 }
+
                 Property::AuthData => {
                     let len = read.get_u16() as usize;
-                    let mut read = read.split_to(len);
+                    let read = read.split_to(len);
                     prop.auth_data = Some(read.to_vec())
                 }
                 _ => return Err(Error::InvalidProperty(format!("0x{:02X}", identifier)))
@@ -158,17 +170,22 @@ impl ConnectProperties {
 
 #[derive(Debug, Default)]
 pub struct WillProperties {
-    content_type: Option<String>,
-    response_topic: Option<String>,
-    correlation_data: Option<Vec<u8>>,
-    will_delay_interval: Option<u32>,
-    message_expiry_interval: Option<u32>,
-    payload_format_indicator: Option<u8>,
-    user_property: Vec<(String, String)>,
+    pub content_type: Option<String>,
+    pub response_topic: Option<String>,
+    pub correlation_data: Option<Vec<u8>>,
+    pub will_delay_interval: Option<u32>,
+    pub message_expiry_interval: Option<u32>,
+    pub payload_format_indicator: Option<u8>,
+    pub user_property: Vec<(String, String)>,
 }
 impl WillProperties {
+    pub fn new() -> Self {
+        Self {
+            ..Default::default()
+        }
+    }
     pub fn read(read: &mut Bytes) -> Result<Option<Self>, Error> {
-        let (mut len, bytes) = read_length(read.iter())?;
+        let (len, bytes) = read_length(read.iter())?;
         read.advance(bytes);
 
         if len == 0 {
@@ -176,9 +193,7 @@ impl WillProperties {
         }
 
         let mut read = read.split_to(len);
-        let mut prop = Self {
-            ..Default::default()
-        };
+        let mut prop = Self::new();
 
         loop {
             if read.len() == 0 {
@@ -189,28 +204,35 @@ impl WillProperties {
                 Property::ContentType => {
                     prop.content_type = Some(read_string(&mut read)?);
                 }
+
                 Property::ResponseTopic => {
                     prop.response_topic = Some(read_string(&mut read)?);
                 }
+
                 Property::CorrelationData => {
                     let len = read.get_u16() as usize;
-                    let mut read = read.split_to(len);
+                    let read = read.split_to(len);
                     prop.correlation_data = Some(read.to_vec())
                 }
+
                 Property::WillDelayInterval => {
                     prop.will_delay_interval = Some(read.get_u32());
                 }
+
                 Property::MessageExpiryInterval => {
                     prop.message_expiry_interval = Some(read.get_u32());
                 }
+
                 Property::PayloadFormatIndicator => {
                     prop.payload_format_indicator = Some(read.get_u8());
                 }
+
                 Property::UserProperty => {
                     let k = read_string(&mut read)?;
                     let v = read_string(&mut read)?;
                     prop.user_property.push((k, v));
                 }
+
                 _ => return Err(Error::InvalidProperty(format!("0x{identifier:02X}")))
             }
         }
