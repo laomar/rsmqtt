@@ -7,6 +7,10 @@ mod puback;
 mod pubrec;
 mod pubcomp;
 mod pubrel;
+mod subscribe;
+mod unsubscribe;
+mod suback;
+mod unsuback;
 
 use std::slice::Iter;
 use std::string::FromUtf8Error;
@@ -23,6 +27,10 @@ pub use puback::*;
 pub use pubrec::*;
 pub use pubcomp::*;
 pub use pubrel::*;
+pub use subscribe::*;
+pub use suback::*;
+pub use unsubscribe::*;
+pub use unsuback::*;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -70,8 +78,8 @@ pub enum Packet {
     PubRec(PubRec),
     PubRel(PubRel),
     PubComp(PubComp),
-    Subscribe,
-    SubAck,
+    Subscribe(Subscribe),
+    SubAck(SubAck),
     Unsubscribe,
     UnsubAck,
     PingReq,

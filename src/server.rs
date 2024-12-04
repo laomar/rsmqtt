@@ -241,7 +241,10 @@ impl<T: S + Debug> Client<T> {
                     let pubrel = PubRel::read(packet, self.version)?;
                     Packet::PubRel(pubrel)
                 }
-                // PacketType::Subscribe => {}
+                PacketType::Subscribe => {
+                    let subscribe = Subscribe::read(packet, self.version)?;
+                    Packet::Subscribe(subscribe)
+                }
                 // PacketType::Unsubscribe => {}
                 PacketType::PingReq => {
                     Packet::PingReq
@@ -284,6 +287,10 @@ impl<T: S + Debug> Client<T> {
                 println!("{:?}", pubcomp);
                 pubcomp.write(&mut self.write, self.version)?;
             }
+            Packet::SubAck(suback) => {
+                println!("{:?}", suback);
+                suback.write(&mut self.write, self.version)?;
+            }
             _ => unreachable!()
         }
         self.stream.write_all(&self.write).await?;
@@ -324,6 +331,13 @@ impl<T: S + Debug> Client<T> {
                             let mut pubcomp = PubComp::new();
                             pubcomp.packet_id = pubrel.packet_id;
                             self.write_packet(Packet::PubComp(pubcomp)).await.unwrap()
+                        }
+                        Packet::Subscribe(subscribe) => {
+                            println!("{:?}", subscribe);
+                            let mut suback = SubAck::new();
+                            suback.packet_id = subscribe.packet_id;
+                            suback.payload.push(0x00);
+                            self.write_packet(Packet::SubAck(suback)).await.unwrap()
                         }
                         Packet::Disconnect(disconnect) => {
                             println!("{:?}", disconnect);
