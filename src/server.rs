@@ -4,12 +4,13 @@ use async_tungstenite::tungstenite::handshake::server::{
     Callback, ErrorResponse, Request, Response,
 };
 use async_tungstenite::tungstenite::http::HeaderValue;
-use thiserror::Error;
+
 use std::fmt::Debug;
 use std::{io, time};
 use std::io::ErrorKind;
 use std::sync::{Arc, RwLock};
 use bytes::{Buf, BytesMut};
+use num_enum::TryFromPrimitiveError;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::task;
@@ -24,7 +25,7 @@ use tokio_rustls::{TlsAcceptor};
 use ws_stream_tungstenite::WsStream;
 use crate::packet::{self, *};
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
@@ -38,6 +39,8 @@ pub enum Error {
     Packet(#[from] packet::Error),
     #[error("Not connect packet")]
     NotConnectPacket,
+    #[error("Invalid packet type: {0}")]
+    TryFromPacketType(#[from] TryFromPrimitiveError<PacketType>),
 }
 
 pub struct Mqtt {
@@ -228,7 +231,7 @@ impl<T: S + Debug> Client<T> {
                 packet.advance(1 + bytes);
             }
 
-            let packet = match PacketType::try_from(byte1 >> 4).unwrap() {
+            let packet = match PacketType::try_from(byte1 >> 4)? {
                 PacketType::Connect => {
                     let connect = Connect::read(packet)?;
                     Packet::Connect(connect)
@@ -245,7 +248,10 @@ impl<T: S + Debug> Client<T> {
                     let subscribe = Subscribe::read(packet, self.version)?;
                     Packet::Subscribe(subscribe)
                 }
-                // PacketType::Unsubscribe => {}
+                PacketType::Unsubscribe => {
+                    let unsubscribe = Unsubscribe::read(packet, self.version)?;
+                    Packet::Unsubscribe(unsubscribe)
+                }
                 PacketType::PingReq => {
                     Packet::PingReq
                 }
@@ -253,7 +259,10 @@ impl<T: S + Debug> Client<T> {
                     let disconnect = Disconnect::read(packet, self.version)?;
                     Packet::Disconnect(disconnect)
                 }
-                // PacketType::Auth => {}
+                PacketType::Auth => {
+                    let auth = Auth::read(packet)?;
+                    Packet::Auth(auth)
+                }
                 _ => unreachable!()
             };
 
@@ -290,6 +299,14 @@ impl<T: S + Debug> Client<T> {
             Packet::SubAck(suback) => {
                 println!("{:?}", suback);
                 suback.write(&mut self.write, self.version)?;
+            }
+            Packet::UnsubAck(unsuback) => {
+                println!("{:?}", unsuback);
+                unsuback.write(&mut self.write, self.version)?;
+            }
+            Packet::Auth(auth) => {
+                println!("{:?}", auth);
+                auth.write(&mut self.write)?;
             }
             _ => unreachable!()
         }
@@ -336,8 +353,15 @@ impl<T: S + Debug> Client<T> {
                             println!("{:?}", subscribe);
                             let mut suback = SubAck::new();
                             suback.packet_id = subscribe.packet_id;
-                            suback.payload.push(0x00);
+                            suback.payload.push(ReasonCode::Success);
                             self.write_packet(Packet::SubAck(suback)).await.unwrap()
+                        }
+                        Packet::Unsubscribe(unsubscribe) => {
+                            println!("{:?}", unsubscribe);
+                            let mut unsuback = UnsubAck::new();
+                            unsuback.packet_id = unsubscribe.packet_id;
+                            unsuback.payload.push(ReasonCode::Success);
+                            self.write_packet(Packet::UnsubAck(unsuback)).await.unwrap()
                         }
                         Packet::Disconnect(disconnect) => {
                             println!("{:?}", disconnect);

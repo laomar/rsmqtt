@@ -11,11 +11,11 @@ mod subscribe;
 mod unsubscribe;
 mod suback;
 mod unsuback;
+mod auth;
 
 use std::slice::Iter;
 use std::string::FromUtf8Error;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use thiserror::Error;
 use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 
 pub use connect::*;
@@ -31,8 +31,9 @@ pub use subscribe::*;
 pub use suback::*;
 pub use unsubscribe::*;
 pub use unsuback::*;
+pub use auth::*;
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("String is not utf8: {0}")]
     NotUtf8(#[from] FromUtf8Error),
@@ -40,14 +41,16 @@ pub enum Error {
     LenShort,
     #[error("Length is too long")]
     LenLong,
-    #[error("Invalid property: {0}")]
-    InvalidProperty(String),
     #[error("Invalid protocol: {0}")]
     InvalidProtocol(String),
     #[error("Invalid protocol version: {0}")]
     InvalidProtocolVersion(u8),
-    #[error("Try From Primitive Error")]
-    TryFrom(#[from] TryFromPrimitiveError<Property>),
+    #[error("Invalid property: {0}")]
+    TryFromProperty(#[from] TryFromPrimitiveError<Property>),
+    #[error("Invalid reason code: {0}")]
+    TryFromReasonCode(#[from] TryFromPrimitiveError<ReasonCode>),
+    #[error("Invalid QoS: {0}")]
+    TryFromQoS(#[from] TryFromPrimitiveError<QoS>),
 }
 #[derive(Debug, TryFromPrimitive)]
 #[repr(u8)]
@@ -80,12 +83,12 @@ pub enum Packet {
     PubComp(PubComp),
     Subscribe(Subscribe),
     SubAck(SubAck),
-    Unsubscribe,
-    UnsubAck,
+    Unsubscribe(Unsubscribe),
+    UnsubAck(UnsubAck),
     PingReq,
     PingResp,
     Disconnect(Disconnect),
-    Auth,
+    Auth(Auth),
 }
 #[derive(Debug, PartialEq, PartialOrd, TryFromPrimitive)]
 #[repr(u8)]
@@ -142,7 +145,7 @@ pub enum Property {
     SubIdentifierAvailable = 0x29,
     SharedSubAvailable = 0x2A,
 }
-#[derive(Debug, PartialEq, PartialOrd, TryFromPrimitive)]
+#[derive(Debug, PartialEq, PartialOrd, Copy, Clone, TryFromPrimitive)]
 #[repr(u8)]
 pub enum ReasonCode {
     Success = 0x00,

@@ -2,35 +2,25 @@ use bytes::{BufMut, BytesMut};
 use crate::packet::*;
 
 #[derive(Debug, Default)]
-pub struct PubRel {
-    pub packet_id: u16,
+pub struct Auth {
     pub reason_code: ReasonCode,
-    pub properties: Option<PubRelProperties>,
+    pub properties: Option<AuthProperties>,
 }
 
-impl PubRel {
+impl Auth {
     pub fn new() -> Self {
         Self {
             ..Default::default()
         }
     }
-    pub fn read(mut read: Bytes, version: Version) -> Result<Self, Error> {
-        let mut pubrel = Self::new();
-        pubrel.packet_id = read.get_u16();
-        if read.len() == 0 {
-            return Ok(pubrel);
-        }
 
-        if version == Version::V5 {
-            pubrel.reason_code = ReasonCode::try_from(read.get_u8())?;
-            if read.len() == 0 {
-                return Ok(pubrel);
-            }
-            pubrel.properties = PubRelProperties::read(&mut read)?;
-        }
-        Ok(pubrel)
+    pub fn read(mut read: Bytes) -> Result<Self, Error> {
+        let mut auth = Self::new();
+        auth.reason_code = ReasonCode::try_from(read.get_u8())?;
+        auth.properties = AuthProperties::read(&mut read)?;
+        Ok(auth)
     }
-    pub fn write(self, write: &mut BytesMut, version: Version) -> Result<(), Error> {
+    pub fn write(self, write: &mut BytesMut) -> Result<(), Error> {
         let mut props_len = 0;
         let mut props_buf = BytesMut::with_capacity(512);
         if let Some(props) = self.properties {
@@ -39,14 +29,11 @@ impl PubRel {
         }
 
         let mut buf = BytesMut::with_capacity(512);
-        buf.put_u16(self.packet_id);
-        if version == Version::V5 {
-            buf.put_u8(self.reason_code as u8);
-            write_length(&mut buf, props_len)?;
-            buf.put(props_buf.freeze());
-        }
+        buf.put_u8(self.reason_code as u8);
+        write_length(&mut buf, props_len)?;
+        buf.put(props_buf.freeze());
 
-        write.put_u8((PacketType::PubRec as u8) << 4);
+        write.put_u8((PacketType::Auth as u8) << 4);
         write_length(write, buf.len())?;
         write.put(buf.freeze());
         Ok(())
@@ -54,12 +41,14 @@ impl PubRel {
 }
 
 #[derive(Debug, Default)]
-pub struct PubRelProperties {
+pub struct AuthProperties {
+    pub auth_method: Option<String>,
+    pub auth_data: Option<Vec<u8>>,
     pub reason_string: Option<String>,
     pub user_property: Vec<(String, String)>,
 }
 
-impl PubRelProperties {
+impl AuthProperties {
     pub fn new() -> Self {
         Self {
             ..Default::default()
@@ -82,6 +71,16 @@ impl PubRelProperties {
             }
             let identifier = read.get_u8();
             match Property::try_from(identifier)? {
+                Property::AuthMethod => {
+                    prop.auth_method = Some(read_string(&mut read)?);
+                }
+
+                Property::AuthData => {
+                    let len = read.get_u16() as usize;
+                    let read = read.split_to(len);
+                    prop.auth_data = Some(read.to_vec())
+                }
+
                 Property::ReasonString => {
                     prop.reason_string = Some(read_string(&mut read)?);
                 }
@@ -95,7 +94,19 @@ impl PubRelProperties {
             }
         }
     }
+
     pub fn write(self, write: &mut BytesMut) {
+        if let Some(auth_method) = self.auth_method {
+            write.put_u8(Property::AuthMethod as u8);
+            write_string(write, &auth_method);
+        }
+
+        if let Some(auth_data) = self.auth_data {
+            write.put_u8(Property::AuthData as u8);
+            write.put_u16(auth_data.len() as u16);
+            write.put_slice(&auth_data);
+        }
+
         if let Some(reason_string) = self.reason_string {
             write.put_u8(Property::ReasonString as u8);
             write_string(write, &reason_string);

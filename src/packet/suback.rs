@@ -5,7 +5,7 @@ use crate::packet::*;
 pub struct SubAck {
     pub packet_id: u16,
     pub properties: Option<SubAckProperties>,
-    pub payload: Vec<u8>,
+    pub payload: Vec<ReasonCode>,
 }
 
 impl SubAck {
@@ -16,6 +16,7 @@ impl SubAck {
     }
 
     pub fn write(self, write: &mut BytesMut, version: Version) -> Result<(), Error> {
+        // Properties
         let mut props_len = 0;
         let mut props_buf = BytesMut::with_capacity(512);
         if let Some(props) = self.properties {
@@ -23,13 +24,15 @@ impl SubAck {
             props_len = props_buf.len();
         }
 
+        // Packet ID
         let mut buf = BytesMut::with_capacity(512);
         buf.put_u16(self.packet_id);
         if version == Version::V5 {
             write_length(&mut buf, props_len)?;
             buf.put(props_buf.freeze());
         }
-        buf.put_slice(&self.payload);
+        let payload: Vec<u8> = self.payload.iter().map(|&rc| rc as u8).collect();
+        buf.put_slice(&payload);
 
         write.put_u8((PacketType::SubAck as u8) << 4);
         write_length(write, buf.len())?;

@@ -51,7 +51,7 @@ impl Connect {
         connect.password_flag = connect_flags & 0x40 > 0;
         connect.will_retain = connect_flags & 0x20 > 0;
         let qos = (connect_flags & 0x18) >> 3;
-        connect.will_qos = QoS::try_from(qos).unwrap();
+        connect.will_qos = QoS::try_from(qos)?;
         connect.will_flag = connect_flags & 0x04 > 0;
         connect.clean_start = connect_flags & 0x02 > 0;
 
@@ -160,9 +160,9 @@ impl ConnectProperties {
                 Property::AuthData => {
                     let len = read.get_u16() as usize;
                     let read = read.split_to(len);
-                    prop.auth_data = Some(read.to_vec())
+                    prop.auth_data = Some(read.to_vec());
                 }
-                _ => return Err(Error::InvalidProperty(format!("0x{:02X}", identifier)))
+                _ => unreachable!()
             }
         }
     }
@@ -233,7 +233,7 @@ impl WillProperties {
                     prop.user_property.push((k, v));
                 }
 
-                _ => return Err(Error::InvalidProperty(format!("0x{identifier:02X}")))
+                _ => unreachable!()
             }
         }
     }

@@ -16,7 +16,7 @@ impl Disconnect {
     pub fn read(mut read: Bytes, version: Version) -> Result<Self, Error> {
         let mut disconnect = Self::new();
         if version == Version::V5 {
-            disconnect.reason_code = ReasonCode::try_from(read.get_u8()).unwrap();
+            disconnect.reason_code = ReasonCode::try_from(read.get_u8())?;
             disconnect.properties = DisconnectProperties::read(&mut read)?;
         }
         Ok(disconnect)
@@ -91,7 +91,7 @@ impl DisconnectProperties {
                     let v = read_string(&mut read)?;
                     prop.user_property.push((k, v));
                 }
-                _ => return Err(Error::InvalidProperty(format!("0x{identifier:02X}")))
+                _ => unreachable!()
             }
         }
     }

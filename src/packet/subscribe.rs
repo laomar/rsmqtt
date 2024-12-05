@@ -52,7 +52,7 @@ impl Subscribe {
             let retain_handling = RetainHandling::try_from(options >> 4 & 0x03).unwrap();
             let retain_as_published = options & 0x08 > 0;
             let no_local = options & 0x04 > 0;
-            let qos = QoS::try_from(options & 0x03).unwrap();
+            let qos = QoS::try_from(options & 0x03)?;
             sub.payload.push(Subscription {
                 topic,
                 retain_handling,
@@ -106,7 +106,7 @@ impl SubscribeProperties {
                     let v = read_string(&mut read)?;
                     prop.user_property.push((k, v));
                 }
-                _ => return Err(Error::InvalidProperty(format!("0x{identifier:02X}")))
+                _ => unreachable!()
             }
         }
     }

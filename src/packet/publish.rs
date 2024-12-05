@@ -24,7 +24,7 @@ impl Publish {
         // Fixed Header
         let flags = byte1 & 0x0F;
         publish.dup = flags >> 3 > 0;
-        publish.qos = QoS::try_from((flags >> 1) & 0x03).unwrap();
+        publish.qos = QoS::try_from((flags >> 1) & 0x03)?;
         publish.retain = flags & 0x01 > 0;
 
         // Topic Name
@@ -118,7 +118,7 @@ impl PublishProperties {
                     let v = read_string(&mut read)?;
                     prop.user_property.push((k, v));
                 }
-                _ => return Err(Error::InvalidProperty(format!("0x{identifier:02X}")))
+                _ => unreachable!()
             }
         }
     }
