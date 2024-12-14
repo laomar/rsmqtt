@@ -1,26 +1,32 @@
-use rsmqtt::MqttServer;
+use rsmqtt::{ConnAck, Connect, Error, MqttServer, Packet, PubAck, Publish};
 use tokio::signal;
-use rsmqtt::hook::HookType;
 
-fn hook() {}
+fn connect(c: Connect) -> Result<Packet, Error> {
+    println!("connect hook: {:?}", c);
+    Ok(Packet::ConnAck(ConnAck::default()))
+}
+fn publish(p: Publish) -> Result<Packet, Error> {
+    println!("Publish hook: {:?}", p);
+    Ok(Packet::PubAck(PubAck::default()))
+}
 #[tokio::main]
 async fn main() {
     MqttServer::new()
-        .listen("tcp", "0.0.0.0:1883")
-        .listens(
-            "tls",
+        .tcp("0.0.0.0:1883")
+        .tls(
             "0.0.0.0:8883",
             "./examples/rsmqtt.crt",
             "./examples/rsmqtt.key",
         )
-        .listen("ws", "0.0.0.0:8083")
-        .listens(
-            "wss",
+        .ws("0.0.0.0:8083")
+        .wss(
             "0.0.0.0:8084",
             "./examples/rsmqtt.crt",
             "./examples/rsmqtt.key",
         )
-        .hook(HookType::Connect)
+        .proxy_protocol(true)
+        .connect(connect)
+        .publish(publish)
         .run()
         .await
         .unwrap();

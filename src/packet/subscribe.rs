@@ -1,13 +1,13 @@
-use bytes::{Buf, Bytes};
 use crate::packet::*;
+use bytes::{Buf, Bytes};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Subscribe {
     pub packet_id: u16,
     pub properties: Option<SubscribeProperties>,
     pub payload: Vec<Subscription>,
 }
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Subscription {
     pub topic: String,
     pub retain_handling: RetainHandling,
@@ -16,7 +16,7 @@ pub struct Subscription {
     pub qos: QoS,
 }
 
-#[derive(Debug, TryFromPrimitive)]
+#[derive(Debug, TryFromPrimitive, Clone)]
 #[repr(u8)]
 enum RetainHandling {
     Sub = 0,
@@ -34,7 +34,7 @@ impl Subscribe {
             ..Default::default()
         }
     }
-    pub fn read(mut read: Bytes, version: Version) -> Result<Self, Error> {
+    pub fn unpack(mut read: Bytes, version: Version) -> Result<Self, Error> {
         let mut sub = Self::new();
 
         // Packet ID
@@ -42,7 +42,7 @@ impl Subscribe {
 
         // Properties
         if version == Version::V5 {
-            sub.properties = SubscribeProperties::read(&mut read)?;
+            sub.properties = SubscribeProperties::unpack(&mut read)?;
         }
 
         // Payload
@@ -65,7 +65,7 @@ impl Subscribe {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct SubscribeProperties {
     pub sub_identifier: Vec<u32>,
     pub user_property: Vec<(String, String)>,
@@ -78,7 +78,7 @@ impl SubscribeProperties {
         }
     }
 
-    pub fn read(read: &mut Bytes) -> Result<Option<Self>, Error> {
+    pub fn unpack(read: &mut Bytes) -> Result<Option<Self>, Error> {
         let (len, bytes) = read_length(read.iter())?;
         read.advance(bytes);
 
@@ -106,7 +106,7 @@ impl SubscribeProperties {
                     let v = read_string(&mut read)?;
                     prop.user_property.push((k, v));
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         }
     }

@@ -1,7 +1,7 @@
-use bytes::{Buf, Bytes};
 use crate::packet::*;
+use bytes::{Buf, Bytes};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Unsubscribe {
     pub packet_id: u16,
     pub properties: Option<UnsubscribeProperties>,
@@ -14,7 +14,7 @@ impl Unsubscribe {
             ..Default::default()
         }
     }
-    pub fn read(mut read: Bytes, version: Version) -> Result<Self, Error> {
+    pub fn unpack(mut read: Bytes, version: Version) -> Result<Self, Error> {
         let mut unsub = Self::new();
 
         // Packet ID
@@ -22,7 +22,7 @@ impl Unsubscribe {
 
         // Properties
         if version == Version::V5 {
-            unsub.properties = UnsubscribeProperties::read(&mut read)?;
+            unsub.properties = UnsubscribeProperties::unpack(&mut read)?;
         }
 
         // Payload
@@ -34,7 +34,7 @@ impl Unsubscribe {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct UnsubscribeProperties {
     pub sub_identifier: Vec<u32>,
     pub user_property: Vec<(String, String)>,
@@ -47,7 +47,7 @@ impl UnsubscribeProperties {
         }
     }
 
-    pub fn read(read: &mut Bytes) -> Result<Option<Self>, Error> {
+    pub fn unpack(read: &mut Bytes) -> Result<Option<Self>, Error> {
         let (len, bytes) = read_length(read.iter())?;
         read.advance(bytes);
 
@@ -75,7 +75,7 @@ impl UnsubscribeProperties {
                     let v = read_string(&mut read)?;
                     prop.user_property.push((k, v));
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         }
     }

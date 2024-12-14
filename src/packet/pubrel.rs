@@ -1,7 +1,7 @@
-use bytes::{BufMut, BytesMut};
 use crate::packet::*;
+use bytes::{BufMut, BytesMut};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct PubRel {
     pub packet_id: u16,
     pub reason_code: ReasonCode,
@@ -14,7 +14,7 @@ impl PubRel {
             ..Default::default()
         }
     }
-    pub fn read(mut read: Bytes, version: Version) -> Result<Self, Error> {
+    pub fn unpack(mut read: Bytes, version: Version) -> Result<Self, Error> {
         let mut pubrel = Self::new();
         pubrel.packet_id = read.get_u16();
         if read.len() == 0 {
@@ -26,15 +26,15 @@ impl PubRel {
             if read.len() == 0 {
                 return Ok(pubrel);
             }
-            pubrel.properties = PubRelProperties::read(&mut read)?;
+            pubrel.properties = PubRelProperties::unpack(&mut read)?;
         }
         Ok(pubrel)
     }
-    pub fn write(self, write: &mut BytesMut, version: Version) -> Result<(), Error> {
+    pub fn pack(self, write: &mut BytesMut, version: Version) -> Result<(), Error> {
         let mut props_len = 0;
         let mut props_buf = BytesMut::with_capacity(512);
         if let Some(props) = self.properties {
-            props.write(&mut props_buf);
+            props.pack(&mut props_buf);
             props_len = props_buf.len();
         }
 
@@ -53,7 +53,7 @@ impl PubRel {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct PubRelProperties {
     pub reason_string: Option<String>,
     pub user_property: Vec<(String, String)>,
@@ -65,7 +65,7 @@ impl PubRelProperties {
             ..Default::default()
         }
     }
-    pub fn read(read: &mut Bytes) -> Result<Option<Self>, Error> {
+    pub fn unpack(read: &mut Bytes) -> Result<Option<Self>, Error> {
         let (len, bytes) = read_length(read.iter())?;
         read.advance(bytes);
 
@@ -91,11 +91,11 @@ impl PubRelProperties {
                     let v = read_string(&mut read)?;
                     prop.user_property.push((k, v));
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         }
     }
-    pub fn write(self, write: &mut BytesMut) {
+    pub fn pack(self, write: &mut BytesMut) {
         if let Some(reason_string) = self.reason_string {
             write.put_u8(Property::ReasonString as u8);
             write_string(write, &reason_string);

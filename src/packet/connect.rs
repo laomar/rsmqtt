@@ -1,8 +1,8 @@
-use bytes::{Buf, Bytes};
 use crate::packet::*;
+use bytes::{Buf, Bytes};
 
 // CONNECT Packet
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Connect {
     pub protocol_name: String,
     pub protocol_version: Version,
@@ -12,7 +12,7 @@ pub struct Connect {
     pub will_qos: QoS,
     pub will_flag: bool,
     pub clean_start: bool,
-    pub keep_alive: u16,
+    pub keepalive: u16,
     pub properties: Option<ConnectProperties>,
     pub client_id: String,
     pub will_properties: Option<WillProperties>,
@@ -28,7 +28,7 @@ impl Connect {
             ..Default::default()
         }
     }
-    pub fn read(mut read: Bytes) -> Result<Self, Error> {
+    pub fn unpack(mut read: Bytes) -> Result<Self, Error> {
         let mut connect = Self::new();
 
         // Protocol Name
@@ -56,11 +56,11 @@ impl Connect {
         connect.clean_start = connect_flags & 0x02 > 0;
 
         // Keep Alive
-        connect.keep_alive = read.get_u16();
+        connect.keepalive = read.get_u16();
 
         // Properties
         if connect.protocol_version == Version::V5 {
-            connect.properties = ConnectProperties::read(&mut read)?;
+            connect.properties = ConnectProperties::unpack(&mut read)?;
         }
 
         // Client ID
@@ -69,7 +69,7 @@ impl Connect {
         // Will
         if connect.will_flag {
             if connect.protocol_version == Version::V5 {
-                connect.will_properties = WillProperties::read(&mut read)?;
+                connect.will_properties = WillProperties::unpack(&mut read)?;
             }
             connect.will_topic = read_string(&mut read)?;
             connect.will_payload = read_string(&mut read)?;
@@ -88,7 +88,7 @@ impl Connect {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ConnectProperties {
     pub session_expiry_interval: Option<u32>,
     pub receive_maximum: Option<u16>,
@@ -106,11 +106,11 @@ impl ConnectProperties {
             ..Default::default()
         }
     }
-    pub fn read(read: &mut Bytes) -> Result<Option<Self>, Error> {
+    pub fn unpack(read: &mut Bytes) -> Result<Option<Self>, Error> {
         let (len, bytes) = read_length(read.iter())?;
         read.advance(bytes);
 
-        if len == 0 {
+        if len == 0 || len > read.len() {
             return Ok(None);
         }
 
@@ -162,13 +162,13 @@ impl ConnectProperties {
                     let read = read.split_to(len);
                     prop.auth_data = Some(read.to_vec());
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         }
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct WillProperties {
     pub content_type: Option<String>,
     pub response_topic: Option<String>,
@@ -184,11 +184,11 @@ impl WillProperties {
             ..Default::default()
         }
     }
-    pub fn read(read: &mut Bytes) -> Result<Option<Self>, Error> {
+    pub fn unpack(read: &mut Bytes) -> Result<Option<Self>, Error> {
         let (len, bytes) = read_length(read.iter())?;
         read.advance(bytes);
 
-        if len == 0 {
+        if len == 0 || len > read.len() {
             return Ok(None);
         }
 
@@ -233,7 +233,7 @@ impl WillProperties {
                     prop.user_property.push((k, v));
                 }
 
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         }
     }

@@ -1,46 +1,48 @@
-mod connect;
-mod connack;
-mod ping;
-mod publish;
-mod disconnect;
-mod puback;
-mod pubrec;
-mod pubcomp;
-mod pubrel;
-mod subscribe;
-mod unsubscribe;
-mod suback;
-mod unsuback;
 mod auth;
+mod connack;
+mod connect;
+mod disconnect;
+mod ping;
+mod puback;
+mod pubcomp;
+mod publish;
+mod pubrec;
+mod pubrel;
+mod suback;
+mod subscribe;
+mod unsuback;
+mod unsubscribe;
 
-use std::slice::Iter;
-use std::string::FromUtf8Error;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
+use std::slice::Iter;
+use std::string::FromUtf8Error;
 
-pub use connect::*;
-pub use connack::*;
-pub use ping::*;
-pub use publish::*;
-pub use disconnect::*;
-pub use puback::*;
-pub use pubrec::*;
-pub use pubcomp::*;
-pub use pubrel::*;
-pub use subscribe::*;
-pub use suback::*;
-pub use unsubscribe::*;
-pub use unsuback::*;
 pub use auth::*;
+pub use connack::*;
+pub use connect::*;
+pub use disconnect::*;
+pub use ping::*;
+pub use puback::*;
+pub use pubcomp::*;
+pub use publish::*;
+pub use pubrec::*;
+pub use pubrel::*;
+pub use suback::*;
+pub use subscribe::*;
+pub use unsuback::*;
+pub use unsubscribe::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("String is not utf8: {0}")]
     NotUtf8(#[from] FromUtf8Error),
-    #[error("Length is too short")]
-    LenShort,
-    #[error("Length is too long")]
-    LenLong,
+    #[error("Packet is too short")]
+    PacketTooShort,
+    #[error("Payload is too long")]
+    PayloadTooLong,
+    #[error("Invalid packet: {0}")]
+    InvalidPacket(String),
     #[error("Invalid protocol: {0}")]
     InvalidProtocol(String),
     #[error("Invalid protocol version: {0}")]
@@ -72,7 +74,7 @@ pub enum PacketType {
     Disconnect,
     Auth,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Packet {
     Connect(Connect),
     ConnAck(ConnAck),
@@ -89,8 +91,9 @@ pub enum Packet {
     PingResp,
     Disconnect(Disconnect),
     Auth(Auth),
+    None,
 }
-#[derive(Debug, PartialEq, PartialOrd, TryFromPrimitive)]
+#[derive(Debug, PartialEq, PartialOrd, Clone, TryFromPrimitive)]
 #[repr(u8)]
 pub enum QoS {
     AtMostOnce = 0,
@@ -200,6 +203,9 @@ impl Default for ReasonCode {
 
 fn read_string(read: &mut Bytes) -> Result<String, Error> {
     let len = read.get_u16() as usize;
+    if len > read.len() {
+        return Err(Error::PacketTooShort);
+    }
     let bytes = read.split_to(len);
     let str = String::from_utf8(bytes.to_vec())?;
     Ok(str)
@@ -226,14 +232,14 @@ pub fn read_length(read: Iter<u8>) -> Result<(usize, usize), Error> {
     }
 
     if !done {
-        return Err(Error::LenShort);
+        return Err(Error::PacketTooShort);
     }
     Ok((len, bytes))
 }
 
 fn write_length(write: &mut BytesMut, mut len: usize) -> Result<(), Error> {
     if len > 268_435_455 {
-        return Err(Error::LenLong);
+        return Err(Error::PayloadTooLong);
     }
     loop {
         let mut byte = (len % 128) as u8;

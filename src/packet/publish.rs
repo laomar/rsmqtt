@@ -1,7 +1,7 @@
-use bytes::{Buf, Bytes};
 use crate::packet::*;
+use bytes::{Buf, Bytes};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Publish {
     pub dup: bool,
     pub qos: QoS,
@@ -18,7 +18,7 @@ impl Publish {
             ..Default::default()
         }
     }
-    pub fn read(mut read: Bytes, version: Version, byte1: u8) -> Result<Self, Error> {
+    pub fn unpack(mut read: Bytes, version: Version, byte1: u8) -> Result<Self, Error> {
         let mut publish = Self::new();
 
         // Fixed Header
@@ -37,7 +37,7 @@ impl Publish {
 
         // Properties
         if version == Version::V5 {
-            publish.properties = PublishProperties::read(&mut read)?;
+            publish.properties = PublishProperties::unpack(&mut read)?;
         }
 
         // Payload
@@ -46,7 +46,7 @@ impl Publish {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct PublishProperties {
     pub payload_format_indicator: Option<u8>,
     pub message_expiry_interval: Option<u32>,
@@ -65,7 +65,7 @@ impl PublishProperties {
         }
     }
 
-    pub fn read(read: &mut Bytes) -> Result<Option<Self>, Error> {
+    pub fn unpack(read: &mut Bytes) -> Result<Option<Self>, Error> {
         let (len, bytes) = read_length(read.iter())?;
         read.advance(bytes);
 
@@ -118,7 +118,7 @@ impl PublishProperties {
                     let v = read_string(&mut read)?;
                     prop.user_property.push((k, v));
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         }
     }

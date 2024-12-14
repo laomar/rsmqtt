@@ -1,67 +1,51 @@
-use crate::hook::{Hook, HookFn, HookType};
+use crate::*;
 use async_tungstenite::tokio::accept_hdr_async;
 use async_tungstenite::tungstenite::handshake::server::{
     Callback, ErrorResponse, Request, Response,
 };
 use async_tungstenite::tungstenite::http::HeaderValue;
-
 use std::fmt::Debug;
-use std::{io, time};
-use std::io::ErrorKind;
-use std::sync::{Arc, RwLock};
-use bytes::{Buf, BytesMut};
-use num_enum::TryFromPrimitiveError;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::task;
-use tokio::time::error::Elapsed;
-use tokio::time::timeout;
-use tokio_rustls::rustls::Error as RustlsError;
 use tokio_rustls::rustls::pki_types::pem::PemObject;
-use tokio_rustls::rustls::pki_types::pem::Error as PemError;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_rustls::rustls::ServerConfig;
-use tokio_rustls::{TlsAcceptor};
+use tokio_rustls::TlsAcceptor;
 use ws_stream_tungstenite::WsStream;
-use crate::packet::{self, *};
 
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("IO error: {0}")]
-    Io(#[from] io::Error),
-    #[error("Keepalive timeout: {0}")]
-    Timeout(#[from] Elapsed),
-    #[error("Pem error: {0}")]
-    Pem(#[from] PemError),
-    #[error("Rustls error: {0}")]
-    Rustls(#[from] RustlsError),
-    #[error("Packet error: {0}")]
-    Packet(#[from] packet::Error),
-    #[error("Not connect packet")]
-    NotConnectPacket,
-    #[error("Invalid packet type: {0}")]
-    TryFromPacketType(#[from] TryFromPrimitiveError<PacketType>),
-}
-
-pub struct Mqtt {
-    listens: Vec<Listen>,
-    hooks: Arc<RwLock<Vec<Hook>>>,
+pub struct MqttServer {
+    listeners: Vec<Listener>,
+    hook: Arc<Hook>,
     proxy_protocol: bool,
 }
-impl Mqtt {
+impl MqttServer {
     pub fn new() -> Self {
         Self {
-            listens: Vec::new(),
-            hooks: Arc::new(RwLock::new(Vec::new())),
+            listeners: Vec::new(),
+            hook: Arc::new(Hook::new()),
             proxy_protocol: false,
         }
     }
-    pub fn listen(&mut self, protocol: &str, addr: &str) -> &mut Self {
-        self.listens(protocol, addr, "", "");
+
+    pub fn tcp(&mut self, addr: &str) -> &mut Self {
+        self._listen("tcp", addr, "", "");
         self
     }
-    pub fn listens(&mut self, protocol: &str, addr: &str, cert: &str, key: &str) -> &mut Self {
-        self.listens.push(Listen {
+    pub fn tls(&mut self, addr: &str, cert: &str, key: &str) -> &mut Self {
+        self._listen("tls", addr, cert, key);
+        self
+    }
+    pub fn ws(&mut self, addr: &str) -> &mut Self {
+        self._listen("ws", addr, "", "");
+        self
+    }
+    pub fn wss(&mut self, addr: &str, cert: &str, key: &str) -> &mut Self {
+        self._listen("wss", addr, cert, key);
+        self
+    }
+    fn _listen(&mut self, protocol: &str, addr: &str, cert: &str, key: &str) -> &mut Self {
+        self.listeners.push(Listener {
             protocol: protocol.to_owned(),
             addr: addr.to_owned(),
             cert: cert.to_owned(),
@@ -69,18 +53,39 @@ impl Mqtt {
         });
         self
     }
-    pub fn hook(&mut self, ht: HookType) -> &mut Self {
-        self.hooks.write().unwrap().push(Hook {});
+
+    pub fn proxy_protocol(&mut self, proxy: bool) -> &mut Self {
+        self.proxy_protocol = proxy;
+        self
+    }
+    pub fn connect(
+        &mut self,
+        f: impl Fn(Connect) -> Result<Packet, Error> + Send + Sync + 'static,
+    ) -> &mut Self {
+        self.hook.register(move |packet| match packet {
+            Packet::Connect(connect) => f(connect),
+            _ => Ok(Packet::None),
+        });
+        self
+    }
+    pub fn publish(
+        &mut self,
+        f: impl Fn(Publish) -> Result<Packet, Error> + Send + Sync + 'static,
+    ) -> &mut Self {
+        self.hook.register(move |packet| match packet {
+            Packet::Publish(publish) => f(publish),
+            _ => Ok(Packet::None),
+        });
         self
     }
     pub async fn run(&mut self) -> Result<(), Error> {
-        if self.listens.is_empty() {
-            self.listen("tcp", "0.0.0.0:1883");
+        if self.listeners.is_empty() {
+            self.tcp("0.0.0.0:1883");
         }
-        for listen in self.listens.clone() {
-            let hooks = self.hooks.clone();
+        for listen in self.listeners.clone() {
+            let hook = Arc::clone(&self.hook);
             task::spawn(async move {
-                if let Err(e) = listen.serve(hooks).await {
+                if let Err(e) = listen.start(hook).await {
                     println!("{}", e);
                 }
             });
@@ -89,19 +94,19 @@ impl Mqtt {
     }
 }
 #[derive(Debug, Clone)]
-struct Listen {
+struct Listener {
     protocol: String,
     addr: String,
     cert: String,
     key: String,
 }
-impl Listen {
-    async fn serve(&self, hooks: Arc<RwLock<Vec<Hook>>>) -> Result<(), Error> {
+impl Listener {
+    async fn start(&self, hook: Arc<Hook>) -> Result<(), Error> {
         let protocol = self.protocol.as_str();
         println!("{}", protocol);
         let acceptor = match protocol {
             "tls" | "wss" => Some(self.acceptor()?),
-            _ => None
+            _ => None,
         };
         let listener = TcpListener::bind(&self.addr).await?;
         loop {
@@ -110,40 +115,42 @@ impl Listen {
                     println!("{:?}", addr);
                     stream
                 }
-                Err(_) => continue
+                Err(_) => continue,
             };
+            let hook = Arc::clone(&hook);
             match protocol {
                 "tcp" => {
-                    task::spawn(Client::new(stream).serve());
+                    let stream = Box::new(stream);
+                    task::spawn(Link::new(stream, hook).serve());
                 }
                 "tls" => {
                     let acceptor = acceptor.clone().unwrap();
                     let stream = match acceptor.accept(stream).await {
-                        Ok(stream) => stream,
-                        Err(_) => continue
+                        Ok(stream) => Box::new(stream),
+                        Err(_) => continue,
                     };
-                    task::spawn(Client::new(stream).serve());
+                    task::spawn(Link::new(stream, hook).serve());
                 }
                 "ws" => {
                     let stream = match accept_hdr_async(stream, WSCallback).await {
                         Ok(stream) => stream,
-                        Err(_) => continue
+                        Err(_) => continue,
                     };
-                    let stream = WsStream::new(stream);
-                    task::spawn(Client::new(stream).serve());
+                    let stream = Box::new(WsStream::new(stream));
+                    task::spawn(Link::new(stream, hook).serve());
                 }
                 "wss" => {
                     let acceptor = acceptor.clone().unwrap();
                     let stream = match acceptor.accept(stream).await {
                         Ok(stream) => stream,
-                        Err(_) => continue
+                        Err(_) => continue,
                     };
                     let stream = match accept_hdr_async(stream, WSCallback).await {
                         Ok(stream) => stream,
-                        Err(_) => continue
+                        Err(_) => continue,
                     };
-                    let stream = WsStream::new(stream);
-                    task::spawn(Client::new(stream).serve());
+                    let stream = Box::new(WsStream::new(stream));
+                    task::spawn(Link::new(stream, hook).serve());
                 }
                 _ => (),
             }
@@ -151,8 +158,7 @@ impl Listen {
     }
     fn acceptor(&self) -> Result<TlsAcceptor, Error> {
         let key = PrivateKeyDer::from_pem_file(&self.key)?;
-        let certs =
-            CertificateDer::pem_file_iter(&self.cert)?.collect::<Result<Vec<_>, _>>()?;
+        let certs = CertificateDer::pem_file_iter(&self.cert)?.collect::<Result<Vec<_>, _>>()?;
         let config = ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(certs, key)?;
@@ -171,231 +177,5 @@ impl Callback for WSCallback {
             .headers_mut()
             .insert("sec-websocket-protocol", HeaderValue::from_static("mqtt"));
         Ok(response)
-    }
-}
-
-trait S: AsyncRead + AsyncWrite + Unpin + Send {}
-impl<T> S for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
-struct Client<T> {
-    stream: T,
-    version: Version,
-    read: BytesMut,
-    write: BytesMut,
-}
-impl<T: S + Debug> Client<T> {
-    fn new(stream: T) -> Self {
-        Client {
-            stream,
-            version: Version::V5,
-            read: BytesMut::with_capacity(10 * 1024),
-            write: BytesMut::with_capacity(10 * 1024),
-        }
-    }
-    async fn read_bytes(&mut self, n: usize) -> io::Result<usize> {
-        let mut count = 0;
-        loop {
-            let read = self.stream.read_buf(&mut self.read).await?;
-            if read == 0 {
-                return Err(io::Error::new(ErrorKind::ConnectionReset, "connection closed by peer"));
-            }
-            count += read;
-            if count >= n {
-                return Ok(count);
-            }
-        }
-    }
-
-    async fn read_packet(&mut self) -> Result<Packet, Error> {
-        let mut n = 2;
-        loop {
-            self.read_bytes(n).await?;
-            let mut read = self.read.iter();
-            let byte1 = *read.next().unwrap();
-
-            let (remaining_len, bytes) = match read_length(read) {
-                Ok((l, b)) => (l, b),
-                Err(_) => {
-                    n = 1;
-                    continue;
-                }
-            };
-
-            let len = 1 + bytes + remaining_len;
-            n = len - self.read.len();
-            if n > 0 {
-                continue;
-            }
-
-            let mut packet = self.read.split_to(len).freeze();
-            if remaining_len > 0 {
-                packet.advance(1 + bytes);
-            }
-
-            let packet = match PacketType::try_from(byte1 >> 4)? {
-                PacketType::Connect => {
-                    let connect = Connect::read(packet)?;
-                    Packet::Connect(connect)
-                }
-                PacketType::Publish => {
-                    let publish = Publish::read(packet, self.version, byte1)?;
-                    Packet::Publish(publish)
-                }
-                PacketType::PubRel => {
-                    let pubrel = PubRel::read(packet, self.version)?;
-                    Packet::PubRel(pubrel)
-                }
-                PacketType::Subscribe => {
-                    let subscribe = Subscribe::read(packet, self.version)?;
-                    Packet::Subscribe(subscribe)
-                }
-                PacketType::Unsubscribe => {
-                    let unsubscribe = Unsubscribe::read(packet, self.version)?;
-                    Packet::Unsubscribe(unsubscribe)
-                }
-                PacketType::PingReq => {
-                    Packet::PingReq
-                }
-                PacketType::Disconnect => {
-                    let disconnect = Disconnect::read(packet, self.version)?;
-                    Packet::Disconnect(disconnect)
-                }
-                PacketType::Auth => {
-                    let auth = Auth::read(packet)?;
-                    Packet::Auth(auth)
-                }
-                _ => unreachable!()
-            };
-
-
-            return Ok(packet);
-        }
-    }
-
-    async fn write_packet(&mut self, packet: Packet) -> Result<(), Error> {
-        match packet {
-            Packet::ConnAck(connack) => {
-                println!("{:?}", connack);
-                connack.write(&mut self.write, self.version)?;
-            }
-            Packet::PingResp => {
-                pingresp::write(&mut self.write);
-            }
-            Packet::Disconnect(disconnect) => {
-                println!("{:?}", disconnect);
-                disconnect.write(&mut self.write, self.version)?;
-            }
-            Packet::PubAck(puback) => {
-                println!("{:?}", puback);
-                puback.write(&mut self.write, self.version)?;
-            }
-            Packet::PubRec(pubrec) => {
-                println!("{:?}", pubrec);
-                pubrec.write(&mut self.write, self.version)?;
-            }
-            Packet::PubComp(pubcomp) => {
-                println!("{:?}", pubcomp);
-                pubcomp.write(&mut self.write, self.version)?;
-            }
-            Packet::SubAck(suback) => {
-                println!("{:?}", suback);
-                suback.write(&mut self.write, self.version)?;
-            }
-            Packet::UnsubAck(unsuback) => {
-                println!("{:?}", unsuback);
-                unsuback.write(&mut self.write, self.version)?;
-            }
-            Packet::Auth(auth) => {
-                println!("{:?}", auth);
-                auth.write(&mut self.write)?;
-            }
-            _ => unreachable!()
-        }
-        self.stream.write_all(&self.write).await?;
-        self.write.clear();
-        Ok(())
-    }
-    async fn serve(mut self) {
-        match self.connect().await {
-            Ok(_) => {
-                loop {
-                    let packet = match self.read_packet().await {
-                        Ok(p) => p,
-                        Err(_) => break
-                    };
-                    match packet {
-                        Packet::PingReq => {
-                            println!("{:?}", packet);
-                            self.write_packet(Packet::PingResp).await.unwrap();
-                        }
-                        Packet::Publish(publish) => {
-                            println!("{:?}", publish);
-                            match publish.qos {
-                                QoS::AtMostOnce => {}
-                                QoS::AtLeastOnce => {
-                                    let mut puback = PubAck::new();
-                                    puback.packet_id = publish.packet_id;
-                                    self.write_packet(Packet::PubAck(puback)).await.unwrap()
-                                }
-                                QoS::ExactlyOnce => {
-                                    let mut pubrec = PubRec::new();
-                                    pubrec.packet_id = publish.packet_id;
-                                    self.write_packet(Packet::PubRec(pubrec)).await.unwrap()
-                                }
-                            }
-                        }
-                        Packet::PubRel(pubrel) => {
-                            println!("{:?}", pubrel);
-                            let mut pubcomp = PubComp::new();
-                            pubcomp.packet_id = pubrel.packet_id;
-                            self.write_packet(Packet::PubComp(pubcomp)).await.unwrap()
-                        }
-                        Packet::Subscribe(subscribe) => {
-                            println!("{:?}", subscribe);
-                            let mut suback = SubAck::new();
-                            suback.packet_id = subscribe.packet_id;
-                            suback.payload.push(ReasonCode::Success);
-                            self.write_packet(Packet::SubAck(suback)).await.unwrap()
-                        }
-                        Packet::Unsubscribe(unsubscribe) => {
-                            println!("{:?}", unsubscribe);
-                            let mut unsuback = UnsubAck::new();
-                            unsuback.packet_id = unsubscribe.packet_id;
-                            unsuback.payload.push(ReasonCode::Success);
-                            self.write_packet(Packet::UnsubAck(unsuback)).await.unwrap()
-                        }
-                        Packet::Disconnect(disconnect) => {
-                            println!("{:?}", disconnect);
-                            break;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Err(e) => {
-                println!("{e}")
-            }
-        }
-    }
-
-    async fn connect(&mut self) -> Result<bool, Error> {
-        let packet = timeout(time::Duration::from_secs(5), self.read_packet()).await??;
-        let connect = match packet {
-            Packet::Connect(connect) => connect,
-            _ => return Err(Error::NotConnectPacket),
-        };
-
-        println!("{:?}", connect);
-        self.version = connect.protocol_version;
-
-        let mut reason_code = ReasonCode::Success;
-        let mut ack = ConnAck::new();
-        ack.reason_code = reason_code;
-        let mut prop = ConnAckProperties::new();
-        prop.topic_alias_max = Some(300);
-        ack.properties = Some(prop);
-        let packet = Packet::ConnAck(ack);
-        self.write_packet(packet).await?;
-
-        Ok(true)
     }
 }

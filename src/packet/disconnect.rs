@@ -1,7 +1,7 @@
-use bytes::{BufMut, BytesMut};
 use crate::packet::*;
+use bytes::{BufMut, BytesMut};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Disconnect {
     pub reason_code: ReasonCode,
     pub properties: Option<DisconnectProperties>,
@@ -13,20 +13,20 @@ impl Disconnect {
             ..Default::default()
         }
     }
-    pub fn read(mut read: Bytes, version: Version) -> Result<Self, Error> {
+    pub fn unpack(mut read: Bytes, version: Version) -> Result<Self, Error> {
         let mut disconnect = Self::new();
         if version == Version::V5 {
             disconnect.reason_code = ReasonCode::try_from(read.get_u8())?;
-            disconnect.properties = DisconnectProperties::read(&mut read)?;
+            disconnect.properties = DisconnectProperties::unpack(&mut read)?;
         }
         Ok(disconnect)
     }
 
-    pub fn write(self, write: &mut BytesMut, version: Version) -> Result<(), Error> {
+    pub fn pack(self, write: &mut BytesMut, version: Version) -> Result<(), Error> {
         let mut props_len = 0;
         let mut props_buf = BytesMut::with_capacity(512);
         if let Some(props) = self.properties {
-            props.write(&mut props_buf);
+            props.pack(&mut props_buf);
             props_len = props_buf.len();
         }
 
@@ -43,7 +43,7 @@ impl Disconnect {
         Ok(())
     }
 }
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct DisconnectProperties {
     pub session_expiry_interval: Option<u32>,
     pub server_reference: Option<String>,
@@ -57,7 +57,7 @@ impl DisconnectProperties {
             ..Default::default()
         }
     }
-    pub fn read(read: &mut Bytes) -> Result<Option<Self>, Error> {
+    pub fn unpack(read: &mut Bytes) -> Result<Option<Self>, Error> {
         let (len, bytes) = read_length(read.iter())?;
         read.advance(bytes);
 
@@ -91,12 +91,12 @@ impl DisconnectProperties {
                     let v = read_string(&mut read)?;
                     prop.user_property.push((k, v));
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         }
     }
 
-    pub fn write(self, write: &mut BytesMut) {
+    pub fn pack(self, write: &mut BytesMut) {
         if let Some(session_expiry_interval) = self.session_expiry_interval {
             write.put_u8(Property::SessionExpiryInterval as u8);
             write.put_u32(session_expiry_interval);

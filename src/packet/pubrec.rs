@@ -1,7 +1,7 @@
-use bytes::{BufMut, BytesMut};
 use crate::packet::*;
+use bytes::{BufMut, BytesMut};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct PubRec {
     pub packet_id: u16,
     pub reason_code: ReasonCode,
@@ -14,11 +14,11 @@ impl PubRec {
             ..Default::default()
         }
     }
-    pub fn write(self, write: &mut BytesMut, version: Version) -> Result<(), Error> {
+    pub fn pack(self, write: &mut BytesMut, version: Version) -> Result<(), Error> {
         let mut props_len = 0;
         let mut props_buf = BytesMut::with_capacity(512);
         if let Some(props) = self.properties {
-            props.write(&mut props_buf);
+            props.pack(&mut props_buf);
             props_len = props_buf.len();
         }
 
@@ -37,7 +37,7 @@ impl PubRec {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct PubRecProperties {
     pub reason_string: Option<String>,
     pub user_property: Vec<(String, String)>,
@@ -49,7 +49,7 @@ impl PubRecProperties {
             ..Default::default()
         }
     }
-    pub fn write(self, write: &mut BytesMut) {
+    pub fn pack(self, write: &mut BytesMut) {
         if let Some(reason_string) = self.reason_string {
             write.put_u8(Property::ReasonString as u8);
             write_string(write, &reason_string);
